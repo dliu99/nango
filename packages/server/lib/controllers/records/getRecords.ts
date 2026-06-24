@@ -7,6 +7,7 @@ import { ENVS, metrics, parseEnvs, zodErrorToHTTP } from '@nangohq/utils';
 
 import { connectionIdSchema, modelSchema, providerConfigKeySchema, variantSchema } from '../../helpers/validation.js';
 import { asyncWrapper } from '../../utils/asyncWrapper.js';
+import { egressTelemetryRecorder } from '../../utils/egressTelemetry.js';
 
 import type { GetPublicRecords } from '@nangohq/types';
 
@@ -103,9 +104,22 @@ export const getPublicRecords = asyncWrapper<GetPublicRecords>(async (req, res) 
         // using the response content-length header as the records size metric in order to avoid stringifying the response body
         const responseSize = parseInt(res.get('content-length') || '0');
 
+        // TODO: add a dimension to track when CL is zero. Does it actually happen?
         metrics.increment(metrics.Types.GET_RECORDS_COUNT, recordsCount, { accountId: account.id });
         metrics.increment(metrics.Types.GET_RECORDS_SIZE_IN_BYTES, responseSize, { accountId: account.id });
         metrics.distribution(metrics.Types.GET_RECORDS_RESPONSE_SIZE_BYTES, responseSize);
+
+        egressTelemetryRecorder.record({
+            accountId: account.id,
+            environmentId: environment.id,
+            environmentName: environment.name,
+            integrationId: headers['provider-config-key'],
+            connectionId: connection.connection_id,
+            package: 'server',
+            callsite: 'get_records',
+            egressedBytes: responseSize,
+            count: 1
+        });
 
         if (result.value.budgetTruncated) {
             metrics.increment(metrics.Types.RECORDS_BUDGET_TRUNCATE, 1, {
